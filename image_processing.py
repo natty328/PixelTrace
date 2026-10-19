@@ -1,89 +1,41 @@
 
 """
 PixelTrace - Image Processing Module
-------------------------------------
 
-Computer vision functions for digital image analysis.
-
-This module handles:
-    1. Image enhancement (brightness and contrast)
-    2. Text and pattern isolation (thresholding)
-    3. Evidence annotation (rectangles and labels)
-
-All functions operate on NumPy image arrays.
-Input color images use OpenCV's BGR color format.
-
-IMPORTANT:
-Processed images are derivatives of the original evidence.
-Original evidence should always be preserved separately.
+All OpenCV color images use BGR format.
+Processing functions return new images and do not
+modify the original evidence.
 """
-
-
-# ============================================================
-# 1. IMPORTS
-# ============================================================
 
 import cv2
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
 
 # ============================================================
-# 2. IMAGE ENHANCEMENT
+# IMAGE ENHANCEMENT
 # ============================================================
 
 def enhance_image(image, brightness=0, contrast=1.0):
-    """
-    Enhance an image by adjusting brightness and contrast.
+    """Adjust brightness and contrast with safe clipping."""
 
-    Parameters:
-        image (np.ndarray):
-            Original image in BGR format.
+    working = image.astype(np.float32)
 
-        brightness (int):
-            Brightness adjustment from -100 to 100.
-
-        contrast (float):
-            Contrast multiplier from 0.5 to 3.0.
-
-
-    Returns:
-        np.ndarray:
-            Enhanced image in BGR format (uint8).
-
-    Notes:
-        Calculations use floating-point values to avoid
-        unintended uint8 overflow during processing.
-        Final pixel values are clipped to 0-255.
-    """
-
-    # Step 1: Convert to floating-point values
-
-    working_image = image.astype(np.float32)
-
-    # Step 2: Adjust contrast across all color channels
-
-    working_image = cv2.multiply(
-        working_image,
+    working = cv2.multiply(
+        working,
         (contrast, contrast, contrast, contrast)
     )
 
-    # Step 3: Adjust brightness across all color channels
-
-    working_image = cv2.add(
-        working_image,
+    working = cv2.add(
+        working,
         (brightness, brightness, brightness, brightness)
     )
 
-    # Step 4: Keep pixel values within the valid range
-
-    working_image = np.clip(working_image, 0, 255)
-
-    # Step 5: Convert back to uint8 for image display
-    return working_image.astype(np.uint8)
+    return np.clip(working, 0, 255).astype(np.uint8)
 
 
 # ============================================================
-# 3. TEXT & PATTERN ISOLATION
+# THRESHOLDING
 # ============================================================
 
 def isolate_patterns(
@@ -93,95 +45,27 @@ def isolate_patterns(
     block_size=11,
     c_value=2
 ):
-    """
-    Isolate visual patterns using grayscale thresholding.
+    """Apply global, adaptive, or Otsu thresholding."""
 
-    Supported methods:
-        Global:
-            Applies one threshold to the entire image.
-
-        Adaptive:
-            Calculates a local threshold for each pixel
-            using its surrounding neighborhood.
-
-        Otsu:
-            Automatically calculates a global threshold
-            from the image's grayscale histogram.
-
-    Parameters:
-        image (np.ndarray):
-            Original image in BGR format.
-
-        method (str):
-            Thresholding method:
-            "Global", "Adaptive", or "Otsu".
-
-        threshold (int):
-            Global threshold value from 0 to 255.
-            Ignored by Adaptive and Otsu.
-
-        block_size (int):
-            Neighborhood size for Adaptive thresholding.
-            Must be odd and at least 3.
-
-        c_value (int):
-            Constant subtracted from the locally
-            calculated Adaptive threshold.
-
-    Returns:
-        tuple:
-            processed_image (np.ndarray):
-                Binary grayscale image (uint8).
-
-            used_threshold (float or None):
-                Actual threshold used for Global/Otsu.
-                None for Adaptive.
-
-    Notes:
-        Thresholding converts grayscale intensity into
-        black (0) or white (255) pixels.
-
-        This may reveal text, boundaries, or patterns,
-        but can also remove image information.
-    """
-
-    # Step 1: Convert BGR image to grayscale
-
-    gray = cv2.cvtColor(
-        image,
-        cv2.COLOR_BGR2GRAY
-    )
-
-    # --------------------------------------------------------
-    # Method A: Global Thresholding
-    # --------------------------------------------------------
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
     if method == "Global":
 
-
-        used_threshold, processed_image = cv2.threshold(
+        used_threshold, result = cv2.threshold(
             gray,
             threshold,
             255,
             cv2.THRESH_BINARY
         )
 
-    # --------------------------------------------------------
-    # Method B: Adaptive Thresholding
-    # --------------------------------------------------------
-
     elif method == "Adaptive":
-
-        # Step 2A: Validate neighborhood size
 
         if block_size < 3 or block_size % 2 == 0:
             raise ValueError(
-                "Block size must be odd and >= 3."
+                "Block size must be odd and at least 3."
             )
 
-        # Step 2B: Calculate local thresholds
-
-        processed_image = cv2.adaptiveThreshold(
+        result = cv2.adaptiveThreshold(
             gray,
             255,
             cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
@@ -192,37 +76,25 @@ def isolate_patterns(
 
         used_threshold = None
 
-    # --------------------------------------------------------
-    # Method C: Otsu Thresholding
-    # --------------------------------------------------------
-
     elif method == "Otsu":
 
-
-        used_threshold, processed_image = cv2.threshold(
+        used_threshold, result = cv2.threshold(
             gray,
             0,
             255,
             cv2.THRESH_BINARY + cv2.THRESH_OTSU
         )
 
-    # --------------------------------------------------------
-    # Error Handling
-    # --------------------------------------------------------
-
     else:
-
-
         raise ValueError(
             f"Unknown threshold method: {method}"
         )
 
-    # Step 3: Return processed image and threshold metadata
-    return processed_image, used_threshold
+    return result, used_threshold
 
 
 # ============================================================
-# 4. EVIDENCE ANNOTATION
+# ORIGINAL SINGLE-REGION ANNOTATION
 # ============================================================
 
 def annotate_image(
@@ -233,64 +105,17 @@ def annotate_image(
     height=100,
     label="Area of Interest"
 ):
-    """
-    Annotate an image with a rectangle and text label.
-
-    This function highlights a selected region of interest
-    without modifying the original image array.
-
-    Parameters:
-        image (np.ndarray):
-            Original image in BGR format.
-
-        x (int):
-            Horizontal coordinate of the rectangle's
-            upper-left corner.
-
-        y (int):
-            Vertical coordinate of the rectangle's
-            upper-left corner.
-
-        width (int):
-            Width of the annotation rectangle in pixels.
-
-        height (int):
-            Height of the annotation rectangle in pixels.
-
-        label (str):
-            Text displayed near the highlighted region.
-
-    Returns:
-        np.ndarray:
-            Annotated copy of the image in BGR format.
-
-    Notes:
-        OpenCV uses BGR color ordering.
-        The color (0, 0, 255) represents red.
-
-        Image coordinates begin at (0, 0)
-        in the upper-left corner.
-    """
-
-    # Step 1: Create a copy of the image
+    """Retained for compatibility with earlier versions."""
 
     annotated = image.copy()
-
-    # Step 2: Retrieve image dimensions
-
     image_height, image_width = annotated.shape[:2]
-
-    # Step 3: Validate the rectangle's starting coordinates
 
     x = max(0, min(int(x), image_width - 1))
     y = max(0, min(int(y), image_height - 1))
 
-    # Step 4: Calculate the rectangle's ending coordinates
-
     x2 = min(x + int(width), image_width - 1)
     y2 = min(y + int(height), image_height - 1)
 
-    # Step 5: Draw a red rectangle around the selected region
     cv2.rectangle(
         annotated,
         (x, y),
@@ -298,8 +123,6 @@ def annotate_image(
         (0, 0, 255),
         3
     )
-
-    # Step 6: Add a descriptive text label
 
     cv2.putText(
         annotated,
@@ -312,5 +135,203 @@ def annotate_image(
         cv2.LINE_AA
     )
 
-    # Step 7: Return the annotated image
     return annotated
+
+
+# ============================================================
+# CONVERT CANVAS RECTANGLES TO ORIGINAL PIXELS
+# ============================================================
+
+def rectangle_records(objects, original_size, canvas_size):
+    """
+    Extract unrotated rectangles from Fabric.js data.
+
+    Convert display coordinates to original-image pixels.
+    """
+
+    original_width, original_height = original_size
+    canvas_width, canvas_height = canvas_size
+
+    records = []
+
+    for obj in objects:
+
+        if str(obj.get("type", "")).lower() != "rect":
+            continue
+
+        # Rotation and skew require additional transforms.
+        if (
+            float(obj.get("angle", 0)) != 0
+            or float(obj.get("skewX", 0)) != 0
+            or float(obj.get("skewY", 0)) != 0
+        ):
+            continue
+
+        left = float(obj.get("left", 0))
+        top = float(obj.get("top", 0))
+
+        width = (
+            float(obj.get("width", 0))
+            * float(obj.get("scaleX", 1))
+        )
+
+        height = (
+            float(obj.get("height", 0))
+            * float(obj.get("scaleY", 1))
+        )
+
+        x1 = round(
+            min(left, left + width)
+            * original_width / canvas_width
+        )
+
+        y1 = round(
+            min(top, top + height)
+            * original_height / canvas_height
+        )
+
+        x2 = round(
+            max(left, left + width)
+            * original_width / canvas_width
+        )
+
+        y2 = round(
+            max(top, top + height)
+            * original_height / canvas_height
+        )
+
+        x1 = max(0, min(original_width - 1, x1))
+        y1 = max(0, min(original_height - 1, y1))
+        x2 = max(0, min(original_width - 1, x2))
+        y2 = max(0, min(original_height - 1, y2))
+
+        if x2 <= x1 or y2 <= y1:
+            continue
+
+        number = len(records) + 1
+
+        records.append({
+            "region_id": f"Region {number}",
+            "region_number": number,
+            "coordinates": {
+                "x1": x1,
+                "y1": y1,
+                "x2": x2,
+                "y2": y2,
+                "width": x2 - x1,
+                "height": y2 - y1
+            }
+        })
+
+    return records
+
+
+# ============================================================
+# SCALABLE ANNOTATION FONT
+# ============================================================
+
+def load_annotation_font(size):
+    """Load a readable font on macOS or Linux."""
+
+    font_paths = [
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"
+    ]
+
+    for font_path in font_paths:
+        try:
+            return ImageFont.truetype(font_path, size)
+        except OSError:
+            continue
+
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:
+        return ImageFont.load_default()
+
+
+# ============================================================
+# CREATE NUMBERED ANNOTATION PREVIEW
+# ============================================================
+
+def numbered_annotation_preview(
+    original_rgb,
+    records,
+    canvas_width
+):
+    """
+    Draw numbered rectangles on a COPY of the image.
+
+    Returns a full-resolution PIL image for preview/export.
+    """
+
+    preview = Image.fromarray(
+        original_rgb.copy()
+    ).convert("RGB")
+
+    draw = ImageDraw.Draw(preview)
+
+    image_width, image_height = preview.size
+
+    scale = min(
+        1.0,
+        canvas_width / image_width
+    )
+
+    border_width = max(3, round(3 / scale))
+    badge_size = max(30, round(36 / scale))
+    font_size = max(18, round(24 / scale))
+
+    font = load_annotation_font(font_size)
+
+    for record in records:
+
+        coords = record["coordinates"]
+
+        x1 = coords["x1"]
+        y1 = coords["y1"]
+        x2 = coords["x2"]
+        y2 = coords["y2"]
+
+        draw.rectangle(
+            [x1, y1, x2, y2],
+            outline=(255, 0, 0),
+            width=border_width
+        )
+
+        badge_x = min(
+            max(0, x1 + 5),
+            max(0, image_width - badge_size)
+        )
+
+        badge_y = min(
+            max(0, y1 + 5),
+            max(0, image_height - badge_size)
+        )
+
+        draw.rectangle(
+            [
+                badge_x,
+                badge_y,
+                badge_x + badge_size,
+                badge_y + badge_size
+            ],
+            fill=(220, 30, 30),
+            outline=(255, 255, 255),
+            width=max(2, round(2 / scale))
+        )
+
+        draw.text(
+            (
+                badge_x + badge_size / 2,
+                badge_y + badge_size / 2
+            ),
+            str(record["region_number"]),
+            fill=(255, 255, 255),
+            font=font,
+            anchor="mm"
+        )
+
+    return preview

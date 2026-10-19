@@ -1,56 +1,40 @@
 
 """
-PixelTrace
-----------------------------------
+PixelTrace - Digital Evidence & Image Analysis
 
-Interactive cybersecurity visual analysis lab
+Computer vision toolkit for cybersecurity-focused
+visual inspection.
 
-This application provides three analysis modes:
-    1. Image Enhancement
-       Adjust brightness and contrast.
+Modes:
+1. Image Enhancement
+2. Text & Pattern Isolation
+3. Evidence Annotation
 
-    2. Text & Pattern Isolation
-       Apply Global, Adaptive, or Otsu thresholding.
-
-    3. Evidence Annotation
-       Highlight regions of interest with rectangles
-       and descriptive text labels.
-
-App responsibilities:
-    - Configure the Streamlit interface.
-    - Accept and validate uploaded images.
-    - Collect user-selected processing parameters.
-    - Call functions from image_processing.py.
-    - Display original and processed images.
-    - Explain relevant processing results.
-
-IMPORTANT:
-PixelTrace is a visual analysis tool, not a forensic
-validation or evidence authentication system.
-
-Processed images are derivatives. Original evidence
-must be preserved separately and remain unmodified.
+Original uploaded image bytes are never overwritten.
 """
 
-
-# ============================================================
-# 1. IMPORTS & APPLICATION CONFIGURATION
-# ============================================================
+import hashlib
+import io
+import json
 
 import cv2
 import numpy as np
 import streamlit as st
 
+from PIL import Image
+from streamlit_drawable_canvas import st_canvas
+
 from image_processing import (
     enhance_image,
     isolate_patterns,
-    annotate_image
+    rectangle_records,
+    numbered_annotation_preview
 )
 
 
-# ------------------------------------------------------------
-# Configure the browser tab and application layout
-# ------------------------------------------------------------
+# ============================================================
+# 1. APP CONFIGURATION
+# ============================================================
 
 st.set_page_config(
     page_title="PixelTrace | Visual Analysis Lab",
@@ -58,19 +42,13 @@ st.set_page_config(
     layout="wide"
 )
 
-
-# ------------------------------------------------------------
-# Display application title and introduction
-# ------------------------------------------------------------
-
 st.title("PixelTrace")
-
 st.header("Digital Evidence & Image Analysis")
 
 st.write(
-    "A computer vision toolkit with a cybersecurity twist "
-    "for examining screenshots, suspicious emails, and "
-    "digital images."
+    "A computer vision toolkit with a cybersecurity "
+    "twist for examining screenshots, suspicious emails, "
+    "documents, and digital images."
 )
 
 st.warning(
@@ -80,15 +58,10 @@ st.warning(
 
 
 # ============================================================
-# 2. SIDEBAR: ANALYSIS CONTROLS
+# 2. SIDEBAR CONTROLS
 # ============================================================
 
 st.sidebar.header("Analysis Controls")
-
-
-# ------------------------------------------------------------
-# Step 1: Select an analysis mode
-# ------------------------------------------------------------
 
 analysis_mode = st.sidebar.selectbox(
     "Analysis Mode",
@@ -99,11 +72,6 @@ analysis_mode = st.sidebar.selectbox(
     ]
 )
 
-
-# ------------------------------------------------------------
-# Step 2: Upload an image for analysis
-# ------------------------------------------------------------
-
 uploaded_file = st.sidebar.file_uploader(
     "Upload an image",
     type=["png", "jpg", "jpeg"]
@@ -111,23 +79,13 @@ uploaded_file = st.sidebar.file_uploader(
 
 
 # ============================================================
-# 3. MODE-SPECIFIC CONTROLS
+# 3. MODE-SPECIFIC SETTINGS
 # ============================================================
-
-# Each analysis mode displays only its relevant controls.
-# Streamlit automatically reruns the application when
-# a user changes a slider or dropdown selection.
-
-
-# ------------------------------------------------------------
-# Mode A: Image Enhancement
-# ------------------------------------------------------------
 
 if analysis_mode == "Image Enhancement":
 
     st.sidebar.subheader("Enhancement Settings")
 
-    # Brightness
     brightness = st.sidebar.slider(
         "Brightness",
         min_value=-100,
@@ -135,7 +93,6 @@ if analysis_mode == "Image Enhancement":
         value=0
     )
 
-    # Contrast
     contrast = st.sidebar.slider(
         "Contrast",
         min_value=0.5,
@@ -145,56 +102,32 @@ if analysis_mode == "Image Enhancement":
     )
 
     st.sidebar.caption(
-        "Adjust brightness and contrast to improve "
-        "the visibility of image details."
+        "Adjust brightness and contrast to reveal "
+        "details in dark or low-contrast images."
     )
-
-
-# ------------------------------------------------------------
-# Mode B: Text & Pattern Isolation
-# ------------------------------------------------------------
 
 elif analysis_mode == "Text & Pattern Isolation":
 
     st.sidebar.subheader("Threshold Settings")
 
-    # Select one of three thresholding algorithms.
     method = st.sidebar.selectbox(
         "Threshold Method",
         ["Global", "Adaptive", "Otsu"]
     )
 
-    # Initialize default values for all threshold methods.
-
     threshold = 127
     block_size = 11
     c_value = 2
-
-    # --------------------------------------------------------
-    # Method A: Global Thresholding
-    # --------------------------------------------------------
 
     if method == "Global":
 
         threshold = st.sidebar.slider(
             "Threshold Value",
-            min_value=0,
-            max_value=255,
-            value=127
+            0, 255, 127
         )
-
-        st.sidebar.caption(
-            "Pixels above this value become white; "
-            "others become black."
-        )
-
-    # --------------------------------------------------------
-    # Method B: Adaptive Thresholding
-    # --------------------------------------------------------
 
     elif method == "Adaptive":
 
-        # Neighborhood size must be odd and at least 3.
         block_size = st.sidebar.slider(
             "Neighborhood Size",
             min_value=3,
@@ -210,171 +143,113 @@ elif analysis_mode == "Text & Pattern Isolation":
             value=2
         )
 
-        st.sidebar.caption(
-            "Adaptive thresholding calculates a local "
-            "threshold for each neighborhood."
-        )
-
-    # --------------------------------------------------------
-    # Method C: Otsu Thresholding
-    # --------------------------------------------------------
-
     elif method == "Otsu":
 
         st.sidebar.info(
-            "Otsu automatically calculates a global "
-            "threshold using the grayscale histogram."
+            "Otsu automatically selects a threshold "
+            "using the image's grayscale histogram."
         )
-
-
-# ------------------------------------------------------------
-# Mode C: Evidence Annotation
-# ------------------------------------------------------------
 
 elif analysis_mode == "Evidence Annotation":
 
     st.sidebar.subheader("Annotation Settings")
 
     st.sidebar.caption(
-        "Highlight a region of interest using a red "
-        "rectangle and descriptive label."
-    )
-
-    # Coordinates represent the rectangle's upper-left corner
-
-    x = st.sidebar.number_input(
-        "Starting X Coordinate",
-        min_value=0,
-        value=50,
-        step=10
-    )
-
-    y = st.sidebar.number_input(
-        "Starting Y Coordinate",
-        min_value=0,
-        value=50,
-        step=10
-    )
-
-
-    annotation_width = st.sidebar.number_input(
-        "Rectangle Width",
-        min_value=1,
-        value=150,
-        step=10
-    )
-
-    annotation_height = st.sidebar.number_input(
-        "Rectangle Height",
-        min_value=1,
-        value=100,
-        step=10
-    )
-
-    # The label describes the highlighted region.
-    annotation_label = st.sidebar.text_input(
-        "Annotation Label",
-        value="Area of Interest",
-        max_chars=100
-    )
-
-    st.sidebar.caption(
-        "Coordinates begin at (0, 0) in the upper-left "
-        "corner of the original image."
+        "Draw multiple regions directly on the image. "
+        "Add labels, record notes, and export your results."
     )
 
 
 # ============================================================
-# 4. IMAGE LOADING & VALIDATION
+# 4. UPLOAD AND VALIDATE IMAGE
 # ============================================================
 
 if uploaded_file is None:
 
     st.info(
-        "Upload an image using the sidebar to begin "
-        "your analysis."
+        "Upload an image using the sidebar "
+        "to begin your analysis."
     )
 
 else:
 
-    # --------------------------------------------------------
-    # Step 1: Read uploaded image bytes
-    # --------------------------------------------------------
+    image_bytes = uploaded_file.getvalue()
 
-    file_bytes = np.frombuffer(
-        uploaded_file.getvalue(),
+    image_hash = hashlib.sha256(
+        image_bytes
+    ).hexdigest()
+
+    file_array = np.frombuffer(
+        image_bytes,
         dtype=np.uint8
     )
 
-    # --------------------------------------------------------
-    # Step 2: Decode the image using OpenCV
-    # --------------------------------------------------------
-
     bgr_image = cv2.imdecode(
-        file_bytes,
+        file_array,
         cv2.IMREAD_COLOR
     )
 
-    # --------------------------------------------------------
-    # Step 3: Validate successful decoding
-    # --------------------------------------------------------
-
     if bgr_image is None:
-
-        st.error(
-            "The uploaded file could not be decoded "
-            "as an image."
-        )
-
+        st.error("Unable to decode the uploaded image.")
         st.stop()
 
-    # --------------------------------------------------------
-    # Step 4: Prepare the original image for display
-    # --------------------------------------------------------
-
-    # OpenCV uses BGR; Streamlit displays RGB arrays.
     original_rgb = cv2.cvtColor(
         bgr_image,
         cv2.COLOR_BGR2RGB
     )
 
+    original_height, original_width = original_rgb.shape[:2]
 
 
     # ========================================================
-    # 5. IMAGE PROCESSING
+    # 5. IMAGE ENHANCEMENT
     # ========================================================
-
-
-    # --------------------------------------------------------
-    # Mode A: Image Enhancement
-    # --------------------------------------------------------
 
     if analysis_mode == "Image Enhancement":
 
-        # Apply the selected brightness and contrast.
         enhanced_bgr = enhance_image(
             bgr_image,
             brightness=brightness,
             contrast=contrast
         )
 
-        # Convert the processed BGR image to RGB.
         processed_image = cv2.cvtColor(
             enhanced_bgr,
             cv2.COLOR_BGR2RGB
         )
 
-        result_title = "Enhanced Image"
-        used_threshold = None
+        st.divider()
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.subheader("Original Evidence")
+            st.image(
+                original_rgb,
+                use_container_width=True
+            )
+
+        with col2:
+            st.subheader("Enhanced Image")
+            st.image(
+                processed_image,
+                use_container_width=True
+            )
+
+        st.info(
+            f"Brightness: {brightness} | "
+            f"Contrast: {contrast:.1f}"
+        )
+
+        st.success("Image enhancement complete!")
 
 
-    # --------------------------------------------------------
-    # Mode B: Text & Pattern Isolation
-    # --------------------------------------------------------
+    # ========================================================
+    # 6. TEXT AND PATTERN ISOLATION
+    # ========================================================
 
     elif analysis_mode == "Text & Pattern Isolation":
 
-        # Apply the selected thresholding algorithm.
         processed_image, used_threshold = isolate_patterns(
             bgr_image,
             method=method,
@@ -383,134 +258,298 @@ else:
             c_value=c_value
         )
 
+        st.divider()
 
-        result_title = "Processed Image"
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.subheader("Original Evidence")
+            st.image(
+                original_rgb,
+                use_container_width=True
+            )
+
+        with col2:
+            st.subheader("Processed Image")
+            st.image(
+                processed_image,
+                use_container_width=True
+            )
+
+        st.write(f"**Threshold Method:** {method}")
+
+        if used_threshold is not None:
+            st.info(
+                f"Threshold used: {used_threshold:.1f}"
+            )
+        else:
+            st.info(
+                "Adaptive thresholding calculates "
+                "different thresholds for local regions."
+            )
+
+        st.success("Pattern isolation complete!")
 
 
-    # --------------------------------------------------------
-    # Mode C: Evidence Annotation
-    # --------------------------------------------------------
+    # ========================================================
+    # 7. INTERACTIVE EVIDENCE ANNOTATION
+    # ========================================================
 
     elif analysis_mode == "Evidence Annotation":
 
-        # Draw a rectangle and label on a copied image.
-        annotated_bgr = annotate_image(
-            bgr_image,
-            x=x,
-            y=y,
-            width=annotation_width,
-            height=annotation_height,
-            label=annotation_label
-        )
-
-        # Convert annotated image from BGR to RGB.
-        processed_image = cv2.cvtColor(
-            annotated_bgr,
-            cv2.COLOR_BGR2RGB
-        )
-
-        result_title = "Annotated Evidence"
-        used_threshold = None
-
-
-    # ========================================================
-    # 6. DISPLAY RESULTS
-    # ========================================================
-
-
-    st.divider()
-
-    col1, col2 = st.columns(2)
-
-
-    # --------------------------------------------------------
-    # Left Column: Original Evidence
-    # --------------------------------------------------------
-
-    with col1:
+        st.divider()
 
         st.subheader("Original Evidence")
 
         st.image(
             original_rgb,
-            width="stretch"
-        )
-
-
-    # --------------------------------------------------------
-    # Right Column: Processed Image
-    # --------------------------------------------------------
-
-    with col2:
-
-        st.subheader(result_title)
-
-        st.image(
-            processed_image,
-            width="stretch",
-            clamp=True
-        )
-
-
-    # ========================================================
-    # 7. ANALYSIS INFORMATION
-    # ========================================================
-
-    # Provide contextual information about the selected
-    # processing method and its parameters.
-
-
-    # --------------------------------------------------------
-    # Thresholding Information
-    # --------------------------------------------------------
-
-    if analysis_mode == "Text & Pattern Isolation":
-
-        st.write(
-            f"**Threshold Method:** {method}"
-        )
-
-        # Global and Otsu return a numeric threshold.
-        if used_threshold is not None:
-
-            st.info(
-                f"Threshold used: {used_threshold:.1f}"
-            )
-
-        # Adaptive calculates different local thresholds.
-        else:
-
-            st.info(
-                "Adaptive thresholding uses locally "
-                "calculated thresholds."
-            )
-
-
-    # --------------------------------------------------------
-    # Annotation Information
-    # --------------------------------------------------------
-
-    elif analysis_mode == "Evidence Annotation":
-
-        st.write(
-            f"**Annotation Label:** {annotation_label}"
-        )
-
-        st.info(
-            f"Starting coordinates: ({x}, {y}) | "
-            f"Rectangle dimensions: "
-            f"{annotation_width} × {annotation_height} pixels"
+            width=350
         )
 
         st.caption(
-            "Annotations are visual overlays. "
-            "They do not establish the authenticity "
-            "or meaning of the highlighted content."
+            f"Original dimensions: "
+            f"{original_width} × {original_height} pixels"
         )
 
+        # ----------------------------------------------------
+        # Prepare canvas display
+        # ----------------------------------------------------
 
-    # --------------------------------------------------------
-    # Processing Status
-    # --------------------------------------------------------
+        display_width = min(700, original_width)
 
-    st.success("Image processing complete!")
+        display_height = max(
+            1,
+            round(
+                original_height
+                * display_width / original_width
+            )
+        )
+
+        display_image = Image.fromarray(
+            original_rgb
+        ).resize(
+            (display_width, display_height),
+            Image.Resampling.LANCZOS
+        )
+
+        # ----------------------------------------------------
+        # Interactive canvas
+        # ----------------------------------------------------
+
+        st.subheader("1. Select Regions of Interest")
+
+        st.caption(
+            "Draw multiple rectangles around suspicious "
+            "areas. Use the toolbar's Edit control "
+            "to move or resize them."
+        )
+
+        canvas_result = st_canvas(
+            fill_color="rgba(255, 0, 0, 0.15)",
+            stroke_width=2,
+            stroke_color="#FF0000",
+            background_image=display_image,
+            update_streamlit=True,
+            height=display_height,
+            width=display_width,
+            drawing_mode="rect",
+            key=f"pixeltrace_canvas_{image_hash}"
+        )
+
+        # ----------------------------------------------------
+        # Extract rectangles
+        # ----------------------------------------------------
+
+        objects = []
+
+        if canvas_result.json_data is not None:
+            objects = canvas_result.json_data.get(
+                "objects",
+                []
+            )
+
+        annotations = rectangle_records(
+            objects,
+            (original_width, original_height),
+            (display_width, display_height)
+        )
+
+        st.write(
+            f"**Regions identified: {len(annotations)}**"
+        )
+
+        # ----------------------------------------------------
+        # Numbered preview
+        # ----------------------------------------------------
+
+        st.subheader("2. Numbered Annotation Preview")
+
+        preview = numbered_annotation_preview(
+            original_rgb,
+            annotations,
+            display_width
+        )
+
+        if annotations:
+
+            display_preview = preview.resize(
+                (display_width, display_height),
+                Image.Resampling.LANCZOS
+            )
+
+            st.image(
+                display_preview,
+                caption="Numbered annotation preview"
+            )
+
+        else:
+
+            st.info(
+                "Draw a rectangle above to generate "
+                "the numbered preview."
+            )
+
+        # ----------------------------------------------------
+        # Analyst labels and notes
+        # ----------------------------------------------------
+
+        st.subheader("3. Analyst Annotations")
+
+        st.caption(
+            "Each annotation number corresponds to "
+            "a numbered rectangle in the preview."
+        )
+
+        for annotation in annotations:
+
+            index = annotation["region_number"]
+            region_id = annotation["region_id"]
+            coords = annotation["coordinates"]
+
+            with st.expander(
+                region_id,
+                expanded=True
+            ):
+
+                st.write(
+                    f"**Original-image coordinates:** "
+                    f"({coords['x1']}, {coords['y1']}) "
+                    f"to ({coords['x2']}, {coords['y2']})"
+                )
+
+                label = st.text_input(
+                    "Annotation Label",
+                    key=f"{image_hash}_label_{index}",
+                    placeholder=(
+                        "Example: Suspicious solder joint"
+                    )
+                )
+
+                notes = st.text_area(
+                    "Analyst Notes",
+                    key=f"{image_hash}_notes_{index}",
+                    placeholder=(
+                        "Describe your observation "
+                        "and why this region matters."
+                    )
+                )
+
+                annotation["label"] = label
+                annotation["notes"] = notes
+
+        # ----------------------------------------------------
+        # Export data
+        # ----------------------------------------------------
+
+        st.subheader("4. Export Results")
+
+        evidence_record = {
+            "application": "PixelTrace",
+            "record_type": "Experimental image annotations",
+            "source_filename": uploaded_file.name,
+            "source_sha256": image_hash,
+            "original_dimensions": {
+                "width": original_width,
+                "height": original_height
+            },
+            "coordinate_system": "Original image pixels",
+            "annotations": annotations,
+            "limitations": (
+                "Region numbers follow canvas order. "
+                "Deleting or reordering rectangles may "
+                "change their associated labels. "
+                "Only unrotated rectangles are supported. "
+                "This prototype does not establish "
+                "a forensic chain of custody."
+            )
+        }
+
+        json_bytes = json.dumps(
+            evidence_record,
+            indent=2
+        ).encode("utf-8")
+
+        jpeg_buffer = io.BytesIO()
+
+        preview.save(
+            jpeg_buffer,
+            format="JPEG",
+            quality=95
+        )
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+
+            st.download_button(
+                label="Download Annotated JPEG",
+                data=jpeg_buffer.getvalue(),
+                file_name="pixeltrace_annotated.jpg",
+                mime="image/jpeg",
+                disabled=not annotations
+            )
+
+        with col2:
+
+            st.download_button(
+                label="Download Annotation JSON",
+                data=json_bytes,
+                file_name="pixeltrace_annotations.json",
+                mime="application/json",
+                disabled=not annotations
+            )
+
+        st.caption(
+            "The JPEG contains the numbered visual "
+            "annotations. The JSON preserves coordinates, "
+            "labels, notes, and the original file hash. "
+            "Neither download overwrites the uploaded image."
+        )
+
+        st.caption(
+            "Prototype limitation: labels are associated "
+            "with region numbers, not permanent rectangle IDs."
+        )
+
+        # ----------------------------------------------------
+        # Debug information
+        # ----------------------------------------------------
+
+        with st.expander(
+            "Developer Debug Information",
+            expanded=False
+        ):
+
+            st.write(
+                "Original SHA-256:",
+                image_hash
+            )
+
+            st.write(
+                "Canvas dimensions:",
+                (display_width, display_height)
+            )
+
+            st.json(objects)
+
+        st.success("Annotation workspace ready!")
