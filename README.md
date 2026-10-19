@@ -6,6 +6,14 @@ PixelTrace is a Python web application that applies computer vision techniques t
 
 The application was developed as a computer vision course project and is being expanded as a cybersecurity portfolio project.
 
+### Live Application
+
+**Try PixelTrace:** https://pixeltrace-natty.streamlit.app/
+
+Upload a non-sensitive image to explore image enhancement, thresholding, and interactive evidence annotation.
+
+*This is a prototype — not intended for confidential or sensitive evidence.*
+
 ## Features
 
 ### 1. Image Enhancement
